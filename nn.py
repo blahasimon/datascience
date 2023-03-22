@@ -3,45 +3,73 @@ import numpy as np
 import numdifftools as nd
 import time
 import warnings
+from typing import Callable
 
 warnings.filterwarnings('ignore')
+np.random.seed(0)
+
+def sigmoid(x):
+    y = 1 / (1 + np.e ** (-x))
+    return y
+
+
+def sigmoid_derivative(x):
+    y = sigmoid(x) * (1 - sigmoid(x))
+    return y
+
+
+def relu(x):
+    y = x if x >= 0 else 0
+    return y
+
+
+def buffer(x):
+    print('This is a buffer function.')
+    return None
 
 
 class NeuralNetwork:
-    def __init__(self, shape: tuple, act_funcs: list[str]):
+    def __init__(self, shape: tuple, act_funcs: list[Callable[[float], float]]):
         self.shape = shape
-        self.act_funcs = act_funcs
+        self.act_funcs = [buffer] + act_funcs
 
         self.n_weights = np.dot(self.shape[:-1], self.shape[1:])
         self.n_biases = np.sum(self.shape[1:])
         self.n_parameters = self.n_weights + self.n_biases
+        self.n_layers = len(self.shape)
 
-        self.A = None
-        self.initialize_layers()
-
-        self.parameters = None
+        self.parameters = np.empty(shape=self.n_parameters, dtype=object)
         self.initialize_parameters()
 
-        self.W = np.zeros(shape=len(self.shape)+1)
-
-    def initialize_layers(self):
-        a = np.empty(shape=len(self.shape), dtype=object)
-        for i, layer_size in enumerate(self.shape):
-            a[i] = np.zeros(shape=layer_size)
-        self.A = a
+        self._A = np.empty(shape=self.n_layers, dtype=object)
+        self._W = np.empty(shape=self.n_layers, dtype=object)
+        self._B = np.empty(shape=self.n_layers, dtype=object)
 
     def initialize_parameters(self):
         self.parameters = np.random.uniform(size=self.n_parameters)
 
+    def feed_forward(self, food: np.ndarray):
+        # don't worry, he doesn't byte
+        self._A[0] = food
+
+    @property
+    def A(self):
+        # self._A[0] = np.zeros(shape=self.shape[0])
+        for i in range(1, self.n_layers):
+            self._A[i] = self.act_funcs[i](np.dot(self.W[i], self._A[i-1]) + self.B[i])
+        return self._A
+
+    @A.setter
+    def A(self, val):
+        self._A = val
+
     @property
     def W(self):
-        w_linear = self.parameters[self.n_weights:]
+        w_linear = self.parameters[:self.n_weights]
         indexes_of_slices = np.cumsum(np.multiply(self.shape[1:], self.shape[:-1]))
         w_slices = np.split(w_linear, indexes_of_slices)[:-1]
-        # w_slices doesn't work
-        _W = np.zeros(shape=len(self.shape)+1)
         for i, weights_slice in enumerate(w_slices):
-            shape_new = (self.shape[i], self.shape[i+1])
+            shape_new = (self.shape[i+1], self.shape[i])
             self._W[i+1] = np.reshape(weights_slice, shape_new)
         return self._W
 
@@ -51,7 +79,19 @@ class NeuralNetwork:
 
     @property
     def B(self):
-        pass
+        b_linear = self.parameters[:-self.n_biases]
+        indexes_of_slices = np.cumsum(self.shape[1:])
+        b_slices = np.split(b_linear, indexes_of_slices)[:-1]
+        self._B[1:] = b_slices
+        return self._B
+
+    @B.setter
+    def B(self, val):
+        self._B = val
+
+    def E(self, expected: np.ndarray):
+        E = np.sum((self.A[-1] - expected) ** 2)
+        return E
 
 
 class Test:
@@ -74,11 +114,6 @@ class Test:
     def change_list(self):
         self.list = None
 
-bruh = Test(5)
-print(bruh.list)
-bruh.change_list()
-print(bruh.list)
-print(bruh.name)
 
-neural_network = NeuralNetwork(shape=(43, 25, 14), act_funcs=['bruh'])
-print(neural_network.W)
+neural_network = NeuralNetwork(shape=(43, 25, 14), act_funcs=[sigmoid, sigmoid])
+neural_network.feed_forward(food=np.random.uniform(size=43))
