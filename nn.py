@@ -25,11 +25,11 @@ def relu(x):
 
 def buffer(x):
     print('This is a buffer function.')
-    return None
+    return 0
 
 
 class NeuralNetwork:
-    def __init__(self, shape: tuple, act_funcs: list[Callable[[float], float]]):
+    def __init__(self, shape: tuple, act_funcs: list[Callable]):
         self.shape = shape
         self.act_funcs = [buffer] + act_funcs
 
@@ -38,15 +38,13 @@ class NeuralNetwork:
         self.n_parameters = self.n_weights + self.n_biases
         self.n_layers = len(self.shape)
 
-        self.parameters = np.empty(shape=self.n_parameters, dtype=object)
-        self.initialize_parameters()
+        self.parameters = np.random.uniform(size=self.n_parameters)
 
         self._A = np.empty(shape=self.n_layers, dtype=object)
         self._W = np.empty(shape=self.n_layers, dtype=object)
         self._B = np.empty(shape=self.n_layers, dtype=object)
 
-    def initialize_parameters(self):
-        self.parameters = np.random.uniform(size=self.n_parameters)
+        self.expected = np.empty(shape=self.shape[-1])
 
     def feed_forward(self, food: np.ndarray):
         # don't worry, he doesn't byte
@@ -93,6 +91,17 @@ class NeuralNetwork:
         E = np.sum((self.A[-1] - expected) ** 2)
         return E
 
+    def gradient(self):
+        return 0
+
+    def propagate_backward(self, expected: np.ndarray):
+        self.expected = expected
+        self.parameters += -self.gradient()
+
+    def train(self, df: pd.DataFrame):
+        df = df.apply(lambda x, y: (self.feed_forward(x), self.propagate_backward(y)))
+        pass
+
 
 class Test:
     def __init__(self, n: int):
@@ -115,5 +124,7 @@ class Test:
         self.list = None
 
 
-neural_network = NeuralNetwork(shape=(43, 25, 14), act_funcs=[sigmoid, sigmoid])
+neural_network = NeuralNetwork(shape=(43, 25, 13), act_funcs=[sigmoid, sigmoid])
 neural_network.feed_forward(food=np.random.uniform(size=43))
+print(neural_network.A[-1])
+print(neural_network.E(expected=np.zeros(shape=13)))
