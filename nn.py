@@ -27,6 +27,13 @@ def buffer(x):
     print('This is a buffer function.')
     return 0
 
+class Function:
+    def __init__(self, func: Callable, derivative: Callable):
+        self.func = func
+
+    def __call__(self, x):
+        return self.func(x)
+    def
 
 class NeuralNetwork:
     def __init__(self, shape: tuple, act_funcs: list[Callable]):
@@ -41,18 +48,17 @@ class NeuralNetwork:
         self.parameters = np.random.uniform(size=self.n_parameters)
 
         self._A = np.empty(shape=self.n_layers, dtype=object)
+        self._A[0] = np.ones(shape=self.shape[0], dtype=object)
+
         self._W = np.empty(shape=self.n_layers, dtype=object)
         self._B = np.empty(shape=self.n_layers, dtype=object)
+        self._E = None
 
-        self.expected = np.empty(shape=self.shape[-1])
-
-    def feed_forward(self, food: np.ndarray):
-        # don't worry, he doesn't byte
-        self._A[0] = food
+        self.training_pair = np.empty(shape=self.shape[0]), np.empty(shape=self.shape[-1])
+        self._food, self._expected = self.training_pair
 
     @property
     def A(self):
-        # self._A[0] = np.zeros(shape=self.shape[0])
         for i in range(1, self.n_layers):
             self._A[i] = self.act_funcs[i](np.dot(self.W[i], self._A[i-1]) + self.B[i])
         return self._A
@@ -87,44 +93,67 @@ class NeuralNetwork:
     def B(self, val):
         self._B = val
 
-    def E(self, expected: np.ndarray):
-        E = np.sum((self.A[-1] - expected) ** 2)
-        return E
+    @property
+    def E(self):
+        self._E = np.sum((self.A[-1] - self.expected) ** 2)
+        return self._E
+
+    @E.setter
+    def E(self, val):
+        self._E = val
+
+    @property
+    def food(self):
+        return self.training_pair[0]
+
+    @food.setter
+    def food(self, val):
+        self._food = val
+
+    @property
+    def expected(self):
+        return self.training_pair[1]
+
+    @expected.setter
+    def expected(self, val):
+        self._expected = val
 
     def gradient(self):
         return 0
 
-    def propagate_backward(self, expected: np.ndarray):
-        self.expected = expected
+    def feed_forward(self):
+        # don't worry, he doesn't byte
+        self._A[0] = self.food
+
+    def propagate_backward(self):
         self.parameters += -self.gradient()
 
-    def train(self, df: pd.DataFrame):
-        df = df.apply(lambda x, y: (self.feed_forward(x), self.propagate_backward(y)))
-        pass
+    def perform_iteration(self, data_pair: tuple[np.array]):
+        self.training_pair = data_pair
+        self.feed_forward()
+        self.propagate_backward()
 
-
-class Test:
-    def __init__(self, n: int):
-        self.list = list(range(n))
-        self.name = 'Petr'
-
-    @property
-    def name(self):
-        return self._name
-
-    @name.setter
-    def name(self, string):
-        self._name = string
-
-    @property
-    def opp(self):
-        return self.list[::-1]
-
-    def change_list(self):
-        self.list = None
+    def train(self, df: pd.DataFrame, n_iter: int = None):
+        if n_iter is not None:
+            df = df[df.index < n_iter]
+        df.apply(self.perform_iteration, axis=1)
 
 
 neural_network = NeuralNetwork(shape=(43, 25, 13), act_funcs=[sigmoid, sigmoid])
-neural_network.feed_forward(food=np.random.uniform(size=43))
-print(neural_network.A[-1])
-print(neural_network.E(expected=np.zeros(shape=13)))
+
+muffin = np.random.uniform(size=43)
+pizza = np.random.uniform(size=43)
+kebab = np.random.uniform(size=43)
+apple = np.random.uniform(size=43)
+
+exp1, exp2, exp3 = np.random.uniform(size=13), np.random.uniform(size=13), np.random.uniform(size=13)
+
+
+data = pd.DataFrame({
+    'food': (muffin, pizza, kebab, apple),
+    'expected': (exp1, exp2, exp3, exp3)
+})
+
+print(neural_network.E)
+neural_network.train(df=data)
+print(neural_network.E)
