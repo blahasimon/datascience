@@ -8,8 +8,9 @@ from typing import Callable
 warnings.filterwarnings('ignore')
 np.random.seed(0)
 
+
 def sigmoid(x):
-    y = 1 / (1 + np.e ** (-x))
+    y = 1 / (1 + np.exp(-x))
     return y
 
 
@@ -27,13 +28,15 @@ def buffer(x):
     print('This is a buffer function.')
     return 0
 
+
 class Function:
     def __init__(self, func: Callable, derivative: Callable):
         self.func = func
+        self.drv = derivative
 
     def __call__(self, x):
         return self.func(x)
-    def
+
 
 class NeuralNetwork:
     def __init__(self, shape: tuple, act_funcs: list[Callable]):
@@ -55,7 +58,7 @@ class NeuralNetwork:
         self._E = None
 
         self.training_pair = np.empty(shape=self.shape[0]), np.empty(shape=self.shape[-1])
-        self._food, self._expected = self.training_pair
+        self.food, self.expected = self.training_pair
 
     @property
     def A(self):
@@ -95,6 +98,8 @@ class NeuralNetwork:
 
     @property
     def E(self):
+        # redefine for a whole batch
+        # the whole section needs redefining
         self._E = np.sum((self.A[-1] - self.expected) ** 2)
         return self._E
 
@@ -119,7 +124,8 @@ class NeuralNetwork:
         self._expected = val
 
     def gradient(self):
-        return 0
+        def delta(x):
+            print(x)
 
     def feed_forward(self):
         # don't worry, he doesn't byte
@@ -132,6 +138,8 @@ class NeuralNetwork:
         self.training_pair = data_pair
         self.feed_forward()
         self.propagate_backward()
+        print(self.A[0])
+        print(self.E)
 
     def train(self, df: pd.DataFrame, n_iter: int = None):
         if n_iter is not None:
@@ -154,6 +162,5 @@ data = pd.DataFrame({
     'expected': (exp1, exp2, exp3, exp3)
 })
 
-print(neural_network.E)
 neural_network.train(df=data)
 print(neural_network.E)
