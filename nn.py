@@ -13,15 +13,26 @@ def sigmoid(x):
     y = 1 / (1 + np.exp(-x))
     return y
 
-
 def sigmoid_derivative(x):
     y = sigmoid(x) * (1 - sigmoid(x))
     return y
 
 
-def relu(x):
+def relu(x: np.array):
     y = x if x >= 0 else 0
     return y
+
+def relu_derivative(x: np.array):
+    y = 1 if x >= 0 else 0
+    return y
+
+def softmax(x: np.array):
+    y = np.exp(x) / np.sum(np.exp(x))
+
+def softmax_derivative(x: np.array):
+    y = softmax(x) * (np.kron(x) - softmax(x))
+    return y
+
 
 
 def buffer(x):
@@ -39,9 +50,14 @@ class Function:
 
 
 class NeuralNetwork:
-    def __init__(self, shape: tuple, act_funcs: list[Callable]):
+    def __init__(self, shape: tuple, act_funcs: list[Callable], eta: float = 0.01):
         self.shape = shape
         self.act_funcs = [buffer] + act_funcs
+        self.derivative_dictionary = {
+            relu: relu_derivative,
+            sigmoid: sigmoid_derivative,
+            softmax: softmax_derivative
+        }
 
         self.n_weights = np.dot(self.shape[:-1], self.shape[1:])
         self.n_biases = np.sum(self.shape[1:])
@@ -55,10 +71,8 @@ class NeuralNetwork:
 
         self._W = np.empty(shape=self.n_layers, dtype=object)
         self._B = np.empty(shape=self.n_layers, dtype=object)
-        self._E = None
 
-        self.training_pair = np.empty(shape=self.shape[0]), np.empty(shape=self.shape[-1])
-        self.food, self.expected = self.training_pair
+        self.eta = eta
 
     @property
     def A(self):
@@ -96,55 +110,56 @@ class NeuralNetwork:
     def B(self, val):
         self._B = val
 
-    @property
-    def E(self):
-        # redefine for a whole batch
-        # the whole section needs redefining
-        self._E = np.sum((self.A[-1] - self.expected) ** 2)
-        return self._E
-
-    @E.setter
-    def E(self, val):
-        self._E = val
-
-    @property
-    def food(self):
-        return self.training_pair[0]
-
-    @food.setter
-    def food(self, val):
-        self._food = val
-
-    @property
-    def expected(self):
-        return self.training_pair[1]
-
-    @expected.setter
-    def expected(self, val):
-        self._expected = val
+    def E(self, expected: np.ndarray):
+        E = np.sum((self.A[-1] - expected) ** 2)
+        return E
 
     def gradient(self):
-        def delta(x):
-            print(x)
+        def dE_dA(l: int):
+            if l == self.n_layers - 1:
+                return 2 * self.A[l]
+            else:
+                return dE_dA(l+1) * dA_dZ(l+1) * self.W[l+1]
 
-    def feed_forward(self):
+        def dE_dW(l: int):
+            print(f'return np.multiply(delta({l}), self.A[{l}-1])')
+            return np.multiply(delta(l), self.A[l-1])
+
+        def dE_dB(l: int):
+            return delta(l)
+
+        def dA_dZ(l: int):
+            act_func_derivative = self.derivative_dictionary[self.act_funcs[l]]
+            return act_func_derivative(self.A[l])
+
+        def delta(l: int):
+            if l == self.n_layers - 1:
+                d_l = np.multiply(dE_dA(l), dA_dZ(l))
+            else:
+                d_l = np.dot(delta(l+1).T, self.W[l+1])
+                d_l = np.multiply(d_l, dA_dZ(l))
+            return d_l  
+
+        grad_weights = np.concatenate([dE_dW(l) for l in range(1, self.n_layers)])
+        grad_biases = np.concatenate([dE_dB(l) for l in range(1, self.n_layers)])
+        grad = np.concatenate([grad_weights, grad_biases])
+        return grad
+
+    def feed_forward(self, food: np.array):
         # don't worry, he doesn't byte
-        self._A[0] = self.food
+        self._A[0] = food
 
     def propagate_backward(self):
         self.parameters += -self.gradient()
 
-    def perform_iteration(self, data_pair: tuple[np.array]):
-        self.training_pair = data_pair
-        self.feed_forward()
-        self.propagate_backward()
-        print(self.A[0])
-        print(self.E)
+    def perform_iteration(self, food: np.array, expected: np.array):
+        self.feed_forward(food)
+        return self.E(expected)
 
-    def train(self, df: pd.DataFrame, n_iter: int = None):
-        if n_iter is not None:
-            df = df[df.index < n_iter]
-        df.apply(self.perform_iteration, axis=1)
+    def perform_epoch(self, df: pd.DataFrame):
+        E = df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1)
+        self.propagate_backward()
+        return E
 
 
 neural_network = NeuralNetwork(shape=(43, 25, 13), act_funcs=[sigmoid, sigmoid])
@@ -156,11 +171,9 @@ apple = np.random.uniform(size=43)
 
 exp1, exp2, exp3 = np.random.uniform(size=13), np.random.uniform(size=13), np.random.uniform(size=13)
 
-
 data = pd.DataFrame({
     'food': (muffin, pizza, kebab, apple),
     'expected': (exp1, exp2, exp3, exp3)
 })
 
-neural_network.train(df=data)
-print(neural_network.E)
+neural_network.perform_epoch(df=data)
