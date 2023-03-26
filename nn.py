@@ -4,14 +4,17 @@ import numdifftools as nd
 import time
 import warnings
 from typing import Callable
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
 np.random.seed(0)
 
 
 def sigmoid(x):
+    x = x.astype(float)
     y = 1 / (1 + np.exp(-x))
     return y
+
 
 def sigmoid_derivative(x):
     y = sigmoid(x) * (1 - sigmoid(x))
@@ -22,17 +25,21 @@ def relu(x: np.array):
     y = x if x >= 0 else 0
     return y
 
+
 def relu_derivative(x: np.array):
     y = 1 if x >= 0 else 0
     return y
 
+
 def softmax(x: np.array):
+    x = x.astype(float)
     y = np.exp(x) / np.sum(np.exp(x))
+    return y
+
 
 def softmax_derivative(x: np.array):
     y = softmax(x) * (np.kron(x) - softmax(x))
     return y
-
 
 
 def buffer(x):
@@ -50,7 +57,7 @@ class Function:
 
 
 class NeuralNetwork:
-    def __init__(self, shape: tuple, act_funcs: list[Callable], eta: float = 0.01):
+    def __init__(self, shape: tuple, act_funcs: list[Callable], eta: float = 0.0005):
         self.shape = shape
         self.act_funcs = [buffer] + act_funcs
         self.derivative_dictionary = {
@@ -111,19 +118,18 @@ class NeuralNetwork:
         self._B = val
 
     def E(self, expected: np.ndarray):
-        E = np.sum((self.A[-1] - expected) ** 2)
+        E = np.mean((self.A[-1] - expected) ** 2)
         return E
 
-    def gradient(self):
+    def gradient(self, expected: np.array) -> np.array:
         def dE_dA(l: int):
             if l == self.n_layers - 1:
-                return 2 * self.A[l]
+                return 2 * (self.A[l] - expected)
             else:
                 return dE_dA(l+1) * dA_dZ(l+1) * self.W[l+1]
 
         def dE_dW(l: int):
-            print(f'return np.multiply(delta({l}), self.A[{l}-1])')
-            return np.multiply(delta(l), self.A[l-1])
+            return np.outer(delta(l), self.A[l-1].T)
 
         def dE_dB(l: int):
             return delta(l)
@@ -134,14 +140,14 @@ class NeuralNetwork:
 
         def delta(l: int):
             if l == self.n_layers - 1:
-                d_l = np.multiply(dE_dA(l), dA_dZ(l))
+                delta_l = np.multiply(dE_dA(l), dA_dZ(l))
             else:
-                d_l = np.dot(delta(l+1).T, self.W[l+1])
-                d_l = np.multiply(d_l, dA_dZ(l))
-            return d_l  
+                delta_l = np.dot(delta(l+1).T, self.W[l+1])
+                delta_l = np.multiply(delta_l, dA_dZ(l))
+            return delta_l
 
-        grad_weights = np.concatenate([dE_dW(l) for l in range(1, self.n_layers)])
-        grad_biases = np.concatenate([dE_dB(l) for l in range(1, self.n_layers)])
+        grad_weights = np.concatenate([dE_dW(l).flatten() for l in range(1, self.n_layers)])
+        grad_biases = np.concatenate([dE_dB(l).flatten() for l in range(1, self.n_layers)])
         grad = np.concatenate([grad_weights, grad_biases])
         return grad
 
@@ -149,20 +155,21 @@ class NeuralNetwork:
         # don't worry, he doesn't byte
         self._A[0] = food
 
-    def propagate_backward(self):
-        self.parameters += -self.gradient()
+    def propagate_backward(self, expected=np.array):
+        grad = self.gradient(expected)
+        grad /= np.linalg.norm(grad)
+        self.parameters += -self.eta * np.linalg.norm(self.parameters) * grad
 
     def perform_iteration(self, food: np.array, expected: np.array):
         self.feed_forward(food)
         return self.E(expected)
 
     def perform_epoch(self, df: pd.DataFrame):
+        food, expected = data.iloc[:, 0].to_numpy(), data.iloc[:, 1].to_numpy()
         E = df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1)
-        self.propagate_backward()
+        df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
         return E
 
-
-neural_network = NeuralNetwork(shape=(43, 25, 13), act_funcs=[sigmoid, sigmoid])
 
 muffin = np.random.uniform(size=43)
 pizza = np.random.uniform(size=43)
@@ -176,4 +183,13 @@ data = pd.DataFrame({
     'expected': (exp1, exp2, exp3, exp3)
 })
 
-neural_network.perform_epoch(df=data)
+neural_network = NeuralNetwork(shape=(43, 25, 13), act_funcs=[sigmoid, sigmoid])
+print(neural_network.A[-1])
+_ = []
+N = 3000
+
+for i in range(N):
+    _.append(np.mean(neural_network.perform_epoch(df=data)))
+
+plt.plot(range(N), _)
+plt.show()
