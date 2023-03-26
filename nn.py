@@ -170,7 +170,19 @@ class NeuralNetwork:
         df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
         return E
 
+    def train(self, df: pd.DataFrame, n_epochs: int):
+        costs = []
+        for i in range(n_epochs):
+            st = time.time()
+            costs.append(self.perform_epoch(df))
+            print(f'Epoch {i+1}/{n_epochs} finished in {time.time() - st}')
+        return costs
 
+    def predict(self, food: np.array):
+        self.feed_forward(food)
+        return self.A[0]
+
+'''
 muffin = np.random.uniform(size=43)
 pizza = np.random.uniform(size=43)
 kebab = np.random.uniform(size=43)
@@ -193,3 +205,5 @@ for i in range(N):
 
 plt.plot(range(N), _)
 plt.show()
+
+'''
