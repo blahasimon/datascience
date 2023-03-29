@@ -80,6 +80,9 @@ class NeuralNetwork:
         self._B = np.empty(shape=self.n_layers, dtype=object)
 
         self.eta = eta
+        self.ETA_LIMIT = 1.e-6
+        self.ETA_FACTOR = 1.5
+        self.eta_limit_warning_raised = False
 
     @property
     def A(self):
@@ -155,9 +158,14 @@ class NeuralNetwork:
         # don't worry, he doesn't byte
         self._A[0] = food
 
-    def propagate_backward(self, expected=np.array):
+    def propagate_backward(self, expected: np.array):
         grad = self.gradient(expected)
         grad /= np.linalg.norm(grad)
+
+        # save current parameters
+        _parameters = self.parameters
+
+        # add gradient to create new parameters
         self.parameters += -self.eta * np.linalg.norm(self.parameters) * grad
 
     def perform_iteration(self, food: np.array, expected: np.array):
@@ -165,24 +173,44 @@ class NeuralNetwork:
         return self.E(expected)
 
     def perform_epoch(self, df: pd.DataFrame):
-        food, expected = data.iloc[:, 0].to_numpy(), data.iloc[:, 1].to_numpy()
-        E = df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1)
+        E_before = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
+        parameters_before = self.parameters
+
         df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
-        return E
+
+        E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
+
+        while E_after >= E_before:
+            if self.eta <= self.ETA_LIMIT and not self.eta_limit_warning_raised:
+                print('Reached learning rate limit!')
+                self.eta_limit_warning_raised = True
+                self.parameters = parameters_before
+                break
+
+            self.parameters = parameters_before
+            self.eta = self.eta / self.ETA_FACTOR
+            df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
+
+        return E_after
 
     def train(self, df: pd.DataFrame, n_epochs: int):
         costs = []
         for i in range(n_epochs):
+            if self.eta_limit_warning_raised:
+                print(f'Convergence achieved, breaking training loop at epoch {i+1}/{n_epochs}.')
+                break
+
             st = time.time()
-            costs.append(self.perform_epoch(df))
-            print(f'Epoch {i+1}/{n_epochs} finished in {time.time() - st}')
+            E = np.mean(self.perform_epoch(df))
+            costs.append(np.mean(E))
+            print(f'Epoch {i+1}/{n_epochs} finished in {time.time() - st:.2f} seconds', end='\r')
         return costs
 
     def predict(self, food: np.array):
         self.feed_forward(food)
         return self.A[0]
 
-'''
+
 muffin = np.random.uniform(size=43)
 pizza = np.random.uniform(size=43)
 kebab = np.random.uniform(size=43)
@@ -196,14 +224,17 @@ data = pd.DataFrame({
 })
 
 neural_network = NeuralNetwork(shape=(43, 25, 13), act_funcs=[sigmoid, sigmoid])
-print(neural_network.A[-1])
+
 _ = []
 N = 3000
 
-for i in range(N):
-    _.append(np.mean(neural_network.perform_epoch(df=data)))
-
-plt.plot(range(N), _)
-plt.show()
+_ = neural_network.train(df=data, n_epochs=N)
+print()
 
 '''
+for i in range(N):
+    _.append(np.mean(neural_network.perform_epoch(df=data)))
+'''
+
+plt.plot(range(len(_)), _)
+plt.show()
