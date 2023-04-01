@@ -22,13 +22,13 @@ def sigmoid_derivative(x):
 
 
 def relu(x: np.array):
-    y = x if x >= 0 else 0
-    return y
+    # y = x if x >= 0 else 0
+    return np.multiply(x, x >= 0)
 
 
 def relu_derivative(x: np.array):
-    y = 1 if x >= 0 else 0
-    return y
+    # y = 1 if x >= 0 else 0
+    return x >= 0
 
 
 def softmax(x: np.array):
@@ -38,7 +38,7 @@ def softmax(x: np.array):
 
 
 def softmax_derivative(x: np.array):
-    y = softmax(x) * (np.kron(x) - softmax(x))
+    y = softmax(x) * (np.kron(x, x) - softmax(x))
     return y
 
 
@@ -47,17 +47,12 @@ def buffer(x):
     return 0
 
 
-class Function:
-    def __init__(self, func: Callable, derivative: Callable):
-        self.func = func
-        self.drv = derivative
-
-    def __call__(self, x):
-        return self.func(x)
-
-
 class NeuralNetwork:
-    def __init__(self, shape: tuple, act_funcs: list[Callable], eta: float = 0.0005):
+    def __init__(self, shape: tuple, act_funcs: list[Callable], eta: float = 0.0005,
+                 eta_limit: float = 0.0, eta_factor: float = 10.0, adaptive_eta: bool = True,
+                 random_seed: int = None):
+        np.random.seed(random_seed)
+
         self.shape = shape
         self.act_funcs = [buffer] + act_funcs
         self.derivative_dictionary = {
@@ -80,8 +75,10 @@ class NeuralNetwork:
         self._B = np.empty(shape=self.n_layers, dtype=object)
 
         self.eta = eta
-        self.ETA_LIMIT = 1.e-6
-        self.ETA_FACTOR = 1.5
+
+        self.adaptive_eta = adaptive_eta
+        self.eta_limit = eta_limit
+        self.eta_factor = eta_factor
         self.eta_limit_warning_raised = False
 
     @property
@@ -160,13 +157,7 @@ class NeuralNetwork:
 
     def propagate_backward(self, expected: np.array):
         grad = self.gradient(expected)
-        grad /= np.linalg.norm(grad)
-
-        # save current parameters
-        _parameters = self.parameters
-
-        # add gradient to create new parameters
-        self.parameters += -self.eta * np.linalg.norm(self.parameters) * grad
+        self.parameters += -self.eta * grad
 
     def perform_iteration(self, food: np.array, expected: np.array):
         self.feed_forward(food)
@@ -180,16 +171,20 @@ class NeuralNetwork:
 
         E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
 
-        while E_after >= E_before:
-            if self.eta <= self.ETA_LIMIT and not self.eta_limit_warning_raised:
-                print('Reached learning rate limit!')
-                self.eta_limit_warning_raised = True
-                self.parameters = parameters_before
-                break
+        if self.adaptive_eta:
+            while E_after >= E_before:
+                if self.eta <= self.eta_limit and not self.eta_limit_warning_raised:
+                    print('Reached learning rate limit!')
+                    self.eta_limit_warning_raised = True
+                    self.parameters = parameters_before
+                    break
 
-            self.parameters = parameters_before
-            self.eta = self.eta / self.ETA_FACTOR
-            df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
+                self.parameters = parameters_before
+                self.eta = self.eta / self.eta_factor
+                print(f'Decreasing learning rate: eta = {self.eta:1.3e}')
+                df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
+                # test
+                E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
 
         return E_after
 
@@ -203,14 +198,18 @@ class NeuralNetwork:
             st = time.time()
             E = np.mean(self.perform_epoch(df))
             costs.append(np.mean(E))
-            print(f'Epoch {i+1}/{n_epochs} finished in {time.time() - st:.2f} seconds', end='\r')
+            print(f'Epoch {i+1}/{n_epochs} finished in {time.time() - st:.2f} seconds')
         return costs
 
-    def predict(self, food: np.array):
+    def predict(self, food: np.array) -> np.array:
         self.feed_forward(food)
-        return self.A[0]
+        return self.A[-1]
 
+    def accuracy(self, df: pd.DataFrame) -> float:
+        is_correct = df.apply(lambda x: np.argmax(self.predict(x.iloc[0])) == np.argmax(x.iloc[1]), axis=1)
+        return np.mean(is_correct)
 
+"""
 muffin = np.random.uniform(size=43)
 pizza = np.random.uniform(size=43)
 kebab = np.random.uniform(size=43)
@@ -231,10 +230,10 @@ N = 3000
 _ = neural_network.train(df=data, n_epochs=N)
 print()
 
-'''
+
 for i in range(N):
     _.append(np.mean(neural_network.perform_epoch(df=data)))
-'''
 
 plt.plot(range(len(_)), _)
 plt.show()
+"""
