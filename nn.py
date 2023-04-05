@@ -4,7 +4,9 @@ import numdifftools as nd
 import time
 import warnings
 from typing import Callable
-import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+import fbchat
+from getpass import getpass
 
 warnings.filterwarnings('ignore')
 np.random.seed(0)
@@ -42,6 +44,16 @@ def softmax_derivative(x: np.array):
     return y
 
 
+def linear(x: np.array, a: float = 1.0, b: float = 0.0):
+    y = a * x + b
+    return y
+
+
+def linear_derivative(x: np.array, a: float = 1.0, b: float = 0.0):
+    return a
+
+
+
 def buffer(x):
     print('This is a buffer function.')
     return 0
@@ -50,9 +62,7 @@ def buffer(x):
 class NeuralNetwork:
     def __init__(self, shape: tuple, act_funcs: list[Callable], eta: float = 0.0005,
                  eta_limit: float = 0.0, eta_factor: float = 10.0, adaptive_eta: bool = True,
-                 random_seed: int = None):
-        np.random.seed(random_seed)
-
+                 random_seed: int = 0):
         self.shape = shape
         self.act_funcs = [buffer] + act_funcs
         self.derivative_dictionary = {
@@ -66,6 +76,7 @@ class NeuralNetwork:
         self.n_parameters = self.n_weights + self.n_biases
         self.n_layers = len(self.shape)
 
+        np.random.seed(random_seed)
         self.parameters = np.random.uniform(size=self.n_parameters)
 
         self._A = np.empty(shape=self.n_layers, dtype=object)
@@ -137,6 +148,7 @@ class NeuralNetwork:
         def dA_dZ(l: int):
             act_func_derivative = self.derivative_dictionary[self.act_funcs[l]]
             return act_func_derivative(self.A[l])
+            # return act_func_derivative(np.dot(self.W[l], self.A[l-1]) + self.B[l])
 
         def delta(l: int):
             if l == self.n_layers - 1:
@@ -157,6 +169,10 @@ class NeuralNetwork:
 
     def propagate_backward(self, expected: np.array):
         grad = self.gradient(expected)
+        # test
+        _grad = np.random.uniform(size=grad.shape[0])
+        _grad /= np.linalg.norm(_grad)
+        _grad *= np.linalg.norm(grad)
         self.parameters += -self.eta * grad
 
     def perform_iteration(self, food: np.array, expected: np.array):
@@ -170,7 +186,6 @@ class NeuralNetwork:
         df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
 
         E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
-
         if self.adaptive_eta:
             while E_after >= E_before:
                 if self.eta <= self.eta_limit and not self.eta_limit_warning_raised:
@@ -184,56 +199,64 @@ class NeuralNetwork:
                 print(f'Decreasing learning rate: eta = {self.eta:1.3e}')
                 df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
                 # test
-                E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
+                E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]),
+                                           axis=1))
 
         return E_after
 
-    def train(self, df: pd.DataFrame, n_epochs: int):
-        costs = []
+    def train(self, df: pd.DataFrame, n_epochs: int, msg_freq: int = 15, messenger: bool = False,
+              username: str = None, reciever: str = 'shia.videos.1'):
+        print('Starting training.')
+
+        COLUMNS = ['start', 'stop', 'E_mean', 'eta', 'acc_train', 'acc_test', 'est_finish']
+        df_stats = pd.DataFrame(columns=COLUMNS,
+                                index=pd.RangeIndex(stop=n_epochs))
+
+        start_train = datetime.now()
+        last_msg = datetime.now()
+        est_finish = None
+
         for i in range(n_epochs):
             if self.eta_limit_warning_raised:
                 print(f'Convergence achieved, breaking training loop at epoch {i+1}/{n_epochs}.')
                 break
 
-            st = time.time()
-            E = np.mean(self.perform_epoch(df))
-            costs.append(np.mean(E))
-            print(f'Epoch {i+1}/{n_epochs} finished in {time.time() - st:.2f} seconds')
-        return costs
+            silence = datetime.now() - last_msg
+            if silence >= timedelta(seconds=msg_freq):
+                print()
+                print(f'[{datetime.now()}]: Currently at epoch {i+1}/{n_epochs}')
+                sec_per_epoch = ((datetime.now() - start_train) / (i+1)).total_seconds()
+                print(f'Average duration per epoch: {sec_per_epoch:.2f} s.')
+
+                est_finish = datetime.now() + timedelta(seconds=(n_epochs - i - 1)*sec_per_epoch)
+                print(f'Estimated time of finishing: {est_finish}')
+                print()
+                last_msg = datetime.now()
+
+            start = datetime.now()
+            E_mean = self.perform_epoch(df)
+            stop = datetime.now()
+            acc_train = self.accuracy(df)
+
+            df_stats.iloc[i] = {'start': start,
+                                'stop': stop,
+                                'E_mean': E_mean,
+                                'acc_train': acc_train,
+                                'acc_test': None,
+                                'eta': self.eta,
+                                'est_finish': est_finish}
+
+        print('Training finished.')
+        return df_stats
 
     def predict(self, food: np.array) -> np.array:
         self.feed_forward(food)
         return self.A[-1]
 
-    def accuracy(self, df: pd.DataFrame) -> float:
+    def accuracy(self, df: pd.DataFrame):
         is_correct = df.apply(lambda x: np.argmax(self.predict(x.iloc[0])) == np.argmax(x.iloc[1]), axis=1)
         return np.mean(is_correct)
 
-"""
-muffin = np.random.uniform(size=43)
-pizza = np.random.uniform(size=43)
-kebab = np.random.uniform(size=43)
-apple = np.random.uniform(size=43)
+    def send_mess(self, message: str):
+        pass
 
-exp1, exp2, exp3 = np.random.uniform(size=13), np.random.uniform(size=13), np.random.uniform(size=13)
-
-data = pd.DataFrame({
-    'food': (muffin, pizza, kebab, apple),
-    'expected': (exp1, exp2, exp3, exp3)
-})
-
-neural_network = NeuralNetwork(shape=(43, 25, 13), act_funcs=[sigmoid, sigmoid])
-
-_ = []
-N = 3000
-
-_ = neural_network.train(df=data, n_epochs=N)
-print()
-
-
-for i in range(N):
-    _.append(np.mean(neural_network.perform_epoch(df=data)))
-
-plt.plot(range(len(_)), _)
-plt.show()
-"""
