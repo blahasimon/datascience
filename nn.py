@@ -44,14 +44,24 @@ def softmax_derivative(x: np.array):
     return y
 
 
-def linear(x: np.array, a: float = 1.0, b: float = 0.0):
-    y = a * x + b
-    return y
+def mean_square(predicted: np.array, expected: np.array):
+    assert predicted.shape == expected.shape
+    return (predicted - expected) ** 2
 
 
-def linear_derivative(x: np.array, a: float = 1.0, b: float = 0.0):
-    return a
+def mean_square_derivative(predicted: np.array, expected: np.array):
+    assert predicted.shape == expected.shape
+    return 2 * (predicted - expected)
 
+
+def cross_entropy(predicted: np.array, expected: np.array):
+    assert predicted.shape == expected.shape
+    return -np.sum(expected * np.log(predicted))
+
+
+def cross_entropy_derivative(predicted: np.array, expected: np.array):
+    assert predicted.shape == expected.shape
+    return -(expected / predicted) + (1 - expected) / (1 - predicted)
 
 
 def buffer(x):
@@ -60,15 +70,19 @@ def buffer(x):
 
 
 class NeuralNetwork:
-    def __init__(self, shape: tuple, act_funcs: list[Callable], eta: float = 0.0005,
-                 eta_limit: float = 0.0, eta_factor: float = 10.0, adaptive_eta: bool = True,
-                 random_seed: int = 0):
+    def __init__(self, shape: tuple, act_funcs: list[Callable], cost_func: Callable, eta: float = 0.0005,
+                 eta_limit: float = 0.0, eta_factor: float = 2.0, adaptive_eta: bool = False,
+                 continue_min_eta: bool = False, random_seed: int = 0):
         self.shape = shape
         self.act_funcs = [buffer] + act_funcs
+        self.cost_func = cost_func
+
         self.derivative_dictionary = {
             relu: relu_derivative,
             sigmoid: sigmoid_derivative,
-            softmax: softmax_derivative
+            softmax: softmax_derivative,
+            mean_square: mean_square_derivative,
+            cross_entropy: cross_entropy_derivative
         }
 
         self.n_weights = np.dot(self.shape[:-1], self.shape[1:])
@@ -91,6 +105,7 @@ class NeuralNetwork:
         self.eta_limit = eta_limit
         self.eta_factor = eta_factor
         self.eta_limit_warning_raised = False
+        self.continue_min_eta = continue_min_eta
 
     @property
     def A(self):
@@ -129,17 +144,18 @@ class NeuralNetwork:
         self._B = val
 
     def E(self, expected: np.ndarray, parameters=None):
-        # debug
         if parameters is not None:
             self.parameters = parameters
-        # debug
-        E = np.mean((self.A[-1] - expected) ** 2)
+        # E = np.mean((self.A[-1] - expected) ** 2)
+        E = self.cost_func(predicted=self.A[-1], expected=expected)
         return E
 
     def gradient(self, expected: np.array) -> np.array:
         def dE_dA(l: int):
             if l == self.n_layers - 1:
-                return 2 * (self.A[l] - expected)
+                # return 2 * (self.A[l] - expected)
+                cost_func_derivative = self.derivative_dictionary[self.cost_func]
+                return cost_func_derivative(predicted=self.A[l], expected=expected)
             else:
                 return dE_dA(l+1) * dA_dZ(l+1) * self.W[l+1]
 
@@ -179,18 +195,14 @@ class NeuralNetwork:
         self.feed_forward(food)
         return self.E(expected)
 
-    def perform_epoch(self, df: pd.DataFrame, indicator: str = 'cost', batch_size: float = 0.1):
-        n_batches = np.ceil(1/batch_size)
-
+    def perform_epoch(self, df: pd.DataFrame, indicator: str = 'cost', batch_size: int = 25):
+        df = df.sample(frac=1)
+        n_batches = np.ceil(df.shape[0]/batch_size)
         for batch in np.array_split(df, n_batches):
             df = pd.DataFrame(batch)
             E_before = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
             parameters_before = self.parameters
 
-            # original
-            # df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
-
-            # debug
             df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
 
             E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
@@ -198,9 +210,17 @@ class NeuralNetwork:
                 while E_after >= E_before:
                     if self.eta <= self.eta_limit and not self.eta_limit_warning_raised:
                         print('Reached learning rate limit!')
-                        self.eta_limit_warning_raised = True
-                        self.parameters = parameters_before
-                        break
+                        if self.continue_min_eta:
+                            print('Continuing with eta_limit.')
+                            self.eta = self.eta_limit
+                            self.adaptive_eta = False
+                            self.parameters = parameters_before
+                            break
+                        else:
+                            print('Stopping learning cycle.')
+                            self.eta_limit_warning_raised = True
+                            self.parameters = parameters_before
+                            break
 
                     self.parameters = parameters_before
                     self.eta = self.eta / self.eta_factor
