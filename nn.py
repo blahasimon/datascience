@@ -77,7 +77,7 @@ class NeuralNetwork:
         self.n_layers = len(self.shape)
 
         np.random.seed(random_seed)
-        self.parameters = np.random.uniform(size=self.n_parameters)
+        self.parameters = np.random.uniform(size=self.n_parameters) - 0.5
 
         self._A = np.empty(shape=self.n_layers, dtype=object)
         self._A[0] = np.ones(shape=self.shape[0], dtype=object)
@@ -118,7 +118,7 @@ class NeuralNetwork:
 
     @property
     def B(self):
-        b_linear = self.parameters[:-self.n_biases]
+        b_linear = self.parameters[-self.n_biases:]
         indexes_of_slices = np.cumsum(self.shape[1:])
         b_slices = np.split(b_linear, indexes_of_slices)[:-1]
         self._B[1:] = b_slices
@@ -128,7 +128,11 @@ class NeuralNetwork:
     def B(self, val):
         self._B = val
 
-    def E(self, expected: np.ndarray):
+    def E(self, expected: np.ndarray, parameters=None):
+        # debug
+        if parameters is not None:
+            self.parameters = parameters
+        # debug
         E = np.mean((self.A[-1] - expected) ** 2)
         return E
 
@@ -169,43 +173,47 @@ class NeuralNetwork:
 
     def propagate_backward(self, expected: np.array):
         grad = self.gradient(expected)
-        # test
-        _grad = np.random.uniform(size=grad.shape[0])
-        _grad /= np.linalg.norm(_grad)
-        _grad *= np.linalg.norm(grad)
         self.parameters += -self.eta * grad
 
     def perform_iteration(self, food: np.array, expected: np.array):
         self.feed_forward(food)
         return self.E(expected)
 
-    def perform_epoch(self, df: pd.DataFrame):
-        E_before = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
-        parameters_before = self.parameters
+    def perform_epoch(self, df: pd.DataFrame, indicator: str = 'cost', batch_size: float = 0.1):
+        n_batches = np.ceil(1/batch_size)
 
-        df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
+        for batch in np.array_split(df, n_batches):
+            df = pd.DataFrame(batch)
+            E_before = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
+            parameters_before = self.parameters
 
-        E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
-        if self.adaptive_eta:
-            while E_after >= E_before:
-                if self.eta <= self.eta_limit and not self.eta_limit_warning_raised:
-                    print('Reached learning rate limit!')
-                    self.eta_limit_warning_raised = True
+            # original
+            # df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
+
+            # debug
+            df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
+
+            E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]), axis=1))
+            if self.adaptive_eta:
+                while E_after >= E_before:
+                    if self.eta <= self.eta_limit and not self.eta_limit_warning_raised:
+                        print('Reached learning rate limit!')
+                        self.eta_limit_warning_raised = True
+                        self.parameters = parameters_before
+                        break
+
                     self.parameters = parameters_before
-                    break
-
-                self.parameters = parameters_before
-                self.eta = self.eta / self.eta_factor
-                print(f'Decreasing learning rate: eta = {self.eta:1.3e}')
-                df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
-                # test
-                E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]),
-                                           axis=1))
-
+                    self.eta = self.eta / self.eta_factor
+                    print(f'Decreasing learning rate: eta = {self.eta:1.3e}')
+                    df.apply(lambda x: self.propagate_backward(expected=x.iloc[1]), axis=1)
+                    # test
+                    E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]),
+                                               axis=1))
+        E_after = np.mean(np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]),
+                                               axis=1)))
         return E_after
 
-    def train(self, df: pd.DataFrame, n_epochs: int, msg_freq: int = 15, messenger: bool = False,
-              username: str = None, reciever: str = 'shia.videos.1'):
+    def train(self, df: pd.DataFrame, n_epochs: int, msg_freq: int = 15, batch_size: float = 0.1):
         print('Starting training.')
 
         COLUMNS = ['start', 'stop', 'E_mean', 'eta', 'acc_train', 'acc_test', 'est_finish']
@@ -234,7 +242,7 @@ class NeuralNetwork:
                 last_msg = datetime.now()
 
             start = datetime.now()
-            E_mean = self.perform_epoch(df)
+            E_mean = self.perform_epoch(df, batch_size=batch_size)
             stop = datetime.now()
             acc_train = self.accuracy(df)
 
@@ -257,6 +265,8 @@ class NeuralNetwork:
         is_correct = df.apply(lambda x: np.argmax(self.predict(x.iloc[0])) == np.argmax(x.iloc[1]), axis=1)
         return np.mean(is_correct)
 
-    def send_mess(self, message: str):
-        pass
+    def gradient_checking(self, expected: np.ndarray, theta: float = 1.e-4) -> float:
+        e_2 = self.E(expected, parameters=self.parameters+theta)
+        e_1 = self.E(expected, parameters=self.parameters-theta)
+        return (e_2 - e_1) / (2 * theta)
 
