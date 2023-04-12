@@ -195,7 +195,7 @@ class NeuralNetwork:
         self.feed_forward(food)
         return self.E(expected)
 
-    def perform_epoch(self, df: pd.DataFrame, indicator: str = 'cost', batch_size: int = 25):
+    def perform_epoch(self, df: pd.DataFrame, batch_size: int):
         df = df.sample(frac=1)
         n_batches = np.ceil(df.shape[0]/batch_size)
         for batch in np.array_split(df, n_batches):
@@ -229,11 +229,13 @@ class NeuralNetwork:
                     # test
                     E_after = np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]),
                                                axis=1))
+                    print(E_after)
         E_after = np.mean(np.mean(df.apply(lambda x: self.perform_iteration(food=x.iloc[0], expected=x.iloc[1]),
                                                axis=1)))
         return E_after
 
-    def train(self, df: pd.DataFrame, n_epochs: int, msg_freq: int = 15, batch_size: float = 0.1):
+    def train(self, df: pd.DataFrame, n_epochs: int, msg_freq: int = 15, batch_size: int = 32,
+              alter_func: Callable = None):
         print('Starting training.')
 
         COLUMNS = ['start', 'stop', 'E_mean', 'eta', 'acc_train', 'acc_test', 'est_finish']
@@ -244,7 +246,11 @@ class NeuralNetwork:
         last_msg = datetime.now()
         est_finish = None
 
+        df0 = df
         for i in range(n_epochs):
+            if alter_func is not None:
+                df = alter_func(df0)
+
             if self.eta_limit_warning_raised:
                 print(f'Convergence achieved, breaking training loop at epoch {i+1}/{n_epochs}.')
                 break
